@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -43,73 +45,106 @@ namespace ZMap.Core
     ///     <MyNamespace:Panorama/>
     ///
     /// </summary>
+    [TemplatePart(Name = "PART_Root", Type = typeof(Grid))]
+    [TemplatePart(Name = "PART_Viewport3D", Type = typeof(Viewport3D))]
+    [TemplatePart(Name = "PART_Camera", Type = typeof(Camera))]
+    [TemplatePart(Name = "PART_Content", Type = typeof(ModelVisual3D))]
     public class Panorama : Control
     {
         #region Fields
 
         private Grid _root = null;
-        private PerspectiveCamera _camera = null;
         private ModelVisual3D _content = null;
+
+        private PanoramaResourceConfig _resourceConfig = null;
+        private int _layerCount = 0;
+        private double _angleRangePerLayer = 0;
 
         private Point _mousePosition;
         private bool _isMouseLeftButtonDown = false;
 
         #endregion
 
+        #region Properties
+
+        public Viewport3D Viewport3D { get; private set; }
+        public PerspectiveCamera Camera { get; private set; }
+        public int CurrentLayerLevel { get; private set; }
+
+        #endregion
+
         #region Dependency Properties
 
         public static readonly DependencyProperty MaxFieldOfViewProperty =
-            DependencyProperty.Register("MaxFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(150.0));
+            DependencyProperty.Register("MaxFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(150.0, OnMaxFieldOfViewChanged));
 
         public static readonly DependencyProperty MinFieldOfViewProperty =
-            DependencyProperty.Register("MinFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(15.0));
+            DependencyProperty.Register("MinFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(5.0, OnMinFieldOfViewChanged));
 
-        public static readonly DependencyProperty PanProperty =
-            DependencyProperty.Register("Pan", typeof(double), typeof(Panorama), new PropertyMetadata(0.0, OnPanChanged));
+        public static readonly DependencyProperty RadiusProperty =
+            DependencyProperty.Register("Radius", typeof(double), typeof(Panorama), new PropertyMetadata(1.0, OnRadiusChanged));
 
-        public static readonly DependencyProperty TiltProperty =
-            DependencyProperty.Register("Tilt", typeof(double), typeof(Panorama), new PropertyMetadata(0.0, OnTiltChanged));
+        public static readonly DependencyProperty StackCountProperty =
+            DependencyProperty.Register("StackCount", typeof(int), typeof(Panorama), new PropertyMetadata(64, OnStackCountChanged));
 
-        public static readonly DependencyProperty ZoomProperty =
-            DependencyProperty.Register("Zoom", typeof(double), typeof(Panorama), new PropertyMetadata(1.0, OnZoomChanged));
+        public static readonly DependencyProperty SliceCountProperty =
+            DependencyProperty.Register("SliceCount", typeof(int), typeof(Panorama), new PropertyMetadata(64, OnSliceCountChanged));
 
         public static readonly DependencyProperty ResourceProperty =
-            DependencyProperty.Register("Resource", typeof(string), typeof(Panorama), new PropertyMetadata(string.Empty));
+            DependencyProperty.Register("Resource", typeof(string), typeof(Panorama), new PropertyMetadata(string.Empty, OnResourceChanged));
 
         #endregion
 
         #region Dependency Property Wrappers
 
+        /// <summary>
+        /// 最大视场角
+        /// </summary>
         public double MaxFieldOfView
         {
             get { return (double)GetValue(MaxFieldOfViewProperty); }
             set { SetValue(MaxFieldOfViewProperty, value); }
         }
 
+        /// <summary>
+        /// 最小视场角
+        /// </summary>
         public double MinFieldOfView
         {
             get { return (double)GetValue(MinFieldOfViewProperty); }
             set { SetValue(MinFieldOfViewProperty, value); }
         }
 
-        public double Pan
+        /// <summary>
+        /// 球体模型半径
+        /// </summary>
+        public double Radius
         {
-            get { return (double)GetValue(PanProperty); }
-            set { SetValue(PanProperty, value); }
+            get { return (double)GetValue(RadiusProperty); }
+            set { SetValue(RadiusProperty, value); }
         }
 
-        public double Tilt
+        /// <summary>
+        /// 球体模型横向切片数量
+        /// </summary>
+        public int StackCount
         {
-            get { return (double)GetValue(TiltProperty); }
-            set { SetValue(TiltProperty, value); }
+            get { return (int)GetValue(StackCountProperty); }
+            set { SetValue(StackCountProperty, value); }
         }
 
-        public double Zoom
+        /// <summary>
+        /// 球体模型纵向切片数量
+        /// </summary>
+        public int SliceCount
         {
-            get { return (double)GetValue(ZoomProperty); }
-            set { SetValue(ZoomProperty, value); }
+            get { return (int)GetValue(SliceCountProperty); }
+            set { SetValue(SliceCountProperty, value); }
         }
 
+        /// <summary>
+        /// 全景地图资源地址
+        /// </summary>
         public string Resource
         {
             get { return (string)GetValue(ResourceProperty); }
@@ -129,40 +164,126 @@ namespace ZMap.Core
 
         #region Private Methods
 
-        private void InitMapTiles()
-        {
-            Model3DGroup model3DGroup = new Model3DGroup();
-            _content.Content = model3DGroup;
+        #region Dependency Property Changed Callbacks
 
-            List<GeometryModel3D> geometries = CreateAllMapTileGeometryModel3Ds();
-            int i = 1;
-            foreach (GeometryModel3D geometry in geometries)
+        private static void OnMaxFieldOfViewChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
+
+            double oldValue = (double)e.OldValue;
+            double newValue = (double)e.NewValue;
+
+            if (oldValue != newValue)
             {
-                string sourceUrl = string.Format(@"C:\Users\dell\Downloads\2020427115041502\2020427115041502PanoramaDemo1_{0}.png", i);
-                geometry.BackMaterial = new DiffuseMaterial(new ImageBrush(new BitmapImage(new Uri(sourceUrl))));
-                geometry.Material = new DiffuseMaterial(new ImageBrush(new BitmapImage(new Uri(sourceUrl))));
-                model3DGroup.Children.Add(geometry);
-                i++;
+                panorama.UpdateAngleRangePerLayer();
+
+                int layerLevel = panorama.GetLayerLevelByFieldOfView();
+                if (panorama.CanChangeLayer(layerLevel))
+                {
+                    panorama.UpdateLayer(layerLevel);
+                }
             }
         }
 
-        private double Radius = 1;
-        private Point3D Center = new Point3D(0, 0, 0);
+        private static void OnMinFieldOfViewChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
 
-        private int _mapTileRowCount = 8;
-        private int _mapTileColumnCount = 8;
+            double oldValue = (double)e.OldValue;
+            double newValue = (double)e.NewValue;
 
-        private int _stackCountPerTile = 8;
-        private int _sliceCountPerTile = 8;
+            if (oldValue != newValue)
+            {
+                panorama.UpdateAngleRangePerLayer();
 
-        private List<GeometryModel3D> CreateAllMapTileGeometryModel3Ds()
+                int layerLevel = panorama.GetLayerLevelByFieldOfView();
+                if (panorama.CanChangeLayer(layerLevel))
+                {
+                    panorama.UpdateLayer(layerLevel);
+                }
+            }
+        }
+
+        private static void OnStackCountChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
+
+            int oldValue = (int)e.OldValue;
+            int newValue = (int)e.NewValue;
+
+            if (oldValue != newValue)
+            {
+                int layerLevel = panorama.GetLayerLevelByFieldOfView();
+                panorama.UpdateLayer(layerLevel);
+            }
+        }
+
+        private static void OnSliceCountChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
+
+            int oldValue = (int)e.OldValue;
+            int newValue = (int)e.NewValue;
+
+            if (oldValue != newValue)
+            {
+                int layerLevel = panorama.GetLayerLevelByFieldOfView();
+                panorama.UpdateLayer(layerLevel);
+            }
+        }
+
+        private static void OnRadiusChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
+
+            int oldValue = (int)e.OldValue;
+            int newValue = (int)e.NewValue;
+
+            if (oldValue != newValue)
+            {
+                int layerLevel = panorama.GetLayerLevelByFieldOfView();
+                panorama.UpdateLayer(layerLevel);
+            }
+        }
+
+        private static void OnResourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
+            string newResourcePath = e.NewValue.ToString();
+            if (string.IsNullOrEmpty(newResourcePath))
+            {
+                panorama.ResetPanoramaResource(panorama);
+                return;
+            }
+
+            string configPath = string.Format(@"{0}\{1}", newResourcePath, "config.json");
+            if (!File.Exists(configPath))
+            {
+                throw new Exception("Panorama configuration file does not exist.");
+            }
+
+            string configString = File.ReadAllText(configPath);
+            PanoramaResourceConfig resourceConfig = JsonSerializer.Deserialize<PanoramaResourceConfig>(configString);
+            if (resourceConfig == null || resourceConfig.Layers == null || resourceConfig.Layers.Count == 0)
+            {
+                throw new Exception("There is something wrong with the panorama resource config.");
+            }
+
+            panorama._resourceConfig = resourceConfig;
+            panorama._layerCount = panorama._resourceConfig.Layers.Count;
+            panorama.UpdateAngleRangePerLayer();
+        }
+
+        #endregion
+
+        private List<GeometryModel3D> CreateAllMapTileGeometryModel3Ds(int mapTileRowCount, int mapTileColumnCount)
         {
             List<GeometryModel3D> geometryModel3DList = new List<GeometryModel3D>();
-            for (int tileRow = 0; tileRow < _mapTileRowCount; tileRow++)
+            for (int tileRow = 0; tileRow < mapTileRowCount; tileRow++)
             {
-                for (int tileColumn = 0; tileColumn < _mapTileColumnCount; tileColumn++)
+                for (int tileColumn = 0; tileColumn < mapTileColumnCount; tileColumn++)
                 {
-                    GeometryModel3D geometryModel3D = CreateMapTileGeometryModel3D(tileRow, tileColumn);
+                    GeometryModel3D geometryModel3D = CreateMapTileGeometryModel3D(tileRow, tileColumn, mapTileRowCount, mapTileColumnCount);
                     geometryModel3DList.Add(geometryModel3D);
                 }
             }
@@ -176,7 +297,7 @@ namespace ZMap.Core
         /// <param name="tileRow"></param>
         /// <param name="tileColumn"></param>
         /// <returns></returns>
-        private GeometryModel3D CreateMapTileGeometryModel3D(int tileRow, int tileColumn)
+        private GeometryModel3D CreateMapTileGeometryModel3D(int tileRow, int tileColumn, int rowCount, int columnCount)
         {
             GeometryModel3D geometryModel3D = new GeometryModel3D();
             geometryModel3D.Material = new DiffuseMaterial(Brushes.Blue);
@@ -185,8 +306,8 @@ namespace ZMap.Core
             MeshGeometry3D mesh = new MeshGeometry3D();
             geometryModel3D.Geometry = mesh;
 
-            int stackCount = _stackCountPerTile * _mapTileRowCount;
-            int sliceCount = _sliceCountPerTile * _mapTileColumnCount;
+            int _stackCountPerTile = StackCount / rowCount;
+            int _sliceCountPerTile = SliceCount / columnCount;
 
             int beginStack = tileRow * _stackCountPerTile;
             int endStack = (tileRow + 1) * _stackCountPerTile;
@@ -196,23 +317,23 @@ namespace ZMap.Core
 
             for (int stack = beginStack; stack <= endStack; stack++)
             {
-                double phi = Maths.HALF_PI - Maths.PI * stack / stackCount;
+                double phi = Maths.HALF_PI - Maths.PI * stack / StackCount;
                 double y = Radius * Math.Sin(phi);
 
                 double scale = Radius * Math.Cos(phi);
                 for (int slice = beginSlice; slice <= endSlice; slice++)
                 {
-                    double theta = Maths.DOUBLE_PI * slice / sliceCount;
+                    double theta = Maths.DOUBLE_PI * slice / SliceCount;
                     double x = scale * Math.Sin(theta);
                     double z = scale * Math.Cos(theta);
 
-                    Point3D position = new Point3D(Center.X - x, Center.Y + y, Center.Z + z);
+                    Point3D position = new Point3D(-x, y, z);
                     mesh.Positions.Add(position);
 
                     Vector3D normal = new Vector3D(x, y, z);
                     mesh.Normals.Add(normal);
 
-                    mesh.TextureCoordinates.Add(new Point(slice / (double)sliceCount, stack / (double)stackCount));
+                    mesh.TextureCoordinates.Add(new Point(slice / (double)SliceCount, stack / (double)StackCount));
                 }
             }
 
@@ -224,46 +345,19 @@ namespace ZMap.Core
                 for (int slice = 0; slice < _sliceCountPerTile; slice++)
                 {
                     mesh.TriangleIndices.Add(topPointStartIndex + slice);
-                    mesh.TriangleIndices.Add(topPointStartIndex + slice + 1);
                     mesh.TriangleIndices.Add(bottomPointStartIndex + slice);
+                    mesh.TriangleIndices.Add(topPointStartIndex + slice + 1);
 
                     if (stack < _sliceCountPerTile)
                     {
                         mesh.TriangleIndices.Add(topPointStartIndex + slice + 1);
-                        mesh.TriangleIndices.Add(bottomPointStartIndex + slice + 1);
                         mesh.TriangleIndices.Add(bottomPointStartIndex + slice);
+                        mesh.TriangleIndices.Add(bottomPointStartIndex + slice + 1);
                     }
                 }
             }
             mesh.Freeze();
             return geometryModel3D;
-        }
-
-        private static void OnPanChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            Panorama panorama = d as Panorama;
-            if (panorama == null)
-            {
-                return;
-            }
-        }
-
-        private static void OnTiltChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            Panorama panorama = d as Panorama;
-            if (panorama == null)
-            {
-                return;
-            }
-        }
-
-        private static void OnZoomChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            Panorama panorama = d as Panorama;
-            if (panorama == null)
-            {
-                return;
-            }
         }
 
         private void Sphere_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -287,15 +381,15 @@ namespace ZMap.Core
                 double horizontalMouseMove = mousePotion.X - _mousePosition.X;
                 if (Math.Abs(verticalMouseMove) > Math.Abs(horizontalMouseMove))
                 {
-                    _camera?.VerticalRotateInSitu(verticalMouseMove);
+                    Camera?.VerticalRotateInSitu(verticalMouseMove);
                 }
                 else
                 {
-                    _camera?.HorizontalRotateInSitu(horizontalMouseMove);
+                    Camera?.HorizontalRotateInSitu(horizontalMouseMove);
                 }
 
-                Pan = Vector3D.AngleBetween(new Vector3D(_camera.LookDirection.X, 0, _camera.LookDirection.Z), new Vector3D(1, 0, 0)) * (_camera.LookDirection.Z >= 0 ? 1 : -1);
-                Tilt = 90 - Vector3D.AngleBetween(_camera.LookDirection, new Vector3D(0, 1, 0));
+                //Pan = Vector3D.AngleBetween(new Vector3D(_camera.LookDirection.X, 0, _camera.LookDirection.Z), new Vector3D(1, 0, 0)) * (_camera.LookDirection.Z >= 0 ? 1 : -1);
+                //Tilt = 90 - Vector3D.AngleBetween(_camera.LookDirection, new Vector3D(0, 1, 0));
                 _mousePosition = e.GetPosition(null);
             }
         }
@@ -312,7 +406,96 @@ namespace ZMap.Core
         private void Sphere_MouseWheel(object sender, MouseWheelEventArgs e)
         {
             double zoomFactor = e.Delta > 0 ? 1 : -1;
-            _camera?.ZoomIn(-zoomFactor, MinFieldOfView, MaxFieldOfView);
+            Camera?.ZoomIn(-zoomFactor, MinFieldOfView, MaxFieldOfView);
+
+            int layerLevel = GetLayerLevelByFieldOfView();
+            if (CanChangeLayer(layerLevel))
+            {
+                UpdateLayer(layerLevel);
+            }
+        }
+
+        /// <summary>
+        /// 根据当前摄像机的市场角获取全景图层层级
+        /// </summary>
+        /// <returns></returns>
+        private int GetLayerLevelByFieldOfView()
+        {
+            if (Camera.FieldOfView >= MaxFieldOfView)
+            {
+                return 1;
+            }
+
+            int layerLevel = _layerCount - (int)((Camera.FieldOfView - MinFieldOfView) / _angleRangePerLayer);
+            return layerLevel;
+        }
+
+        /// <summary>
+        /// 更新每一图层的视场角范围大小
+        /// </summary>
+        private void UpdateAngleRangePerLayer()
+        {
+            _angleRangePerLayer = (MaxFieldOfView - MinFieldOfView) / _layerCount;
+        }
+
+        /// <summary>
+        /// 判断是否需要切换全景图层
+        /// </summary>
+        /// <param name="layerLevel"></param>
+        /// <returns></returns>
+        private bool CanChangeLayer(int layerLevel)
+        {
+            return layerLevel > 0
+                && layerLevel <= _layerCount
+                && layerLevel != CurrentLayerLevel;
+        }
+
+        /// <summary>
+        /// 切换全景图层
+        /// </summary>
+        /// <param name="layerLevel"></param>
+        private void UpdateLayer(int layerLevel)
+        {
+            if (_content == null)
+            {
+                return;
+            }
+
+            CurrentLayerLevel = layerLevel;
+
+            PanoramaLayer layer = _resourceConfig.Layers[layerLevel - 1];
+
+            Model3DGroup model3DGroup = new Model3DGroup();
+            _content.Content = model3DGroup;
+
+            List<GeometryModel3D> geometries = CreateAllMapTileGeometryModel3Ds(layer.RowCount, layer.ColumnCount);
+
+            string imageResourcePath = string.Format(@"{0}\{1}", Resource, layer.ImageResourcePath);
+            for (int i = 0; i < geometries.Count; i++)
+            {
+                GeometryModel3D geometry = geometries[i];
+
+                //图片资源的起始索引是1
+                string sourceUrl = string.Format(@"{0}\{1}.png", imageResourcePath, i + 1);
+                geometry.Material = new DiffuseMaterial(new ImageBrush(new BitmapImage(new Uri(sourceUrl))));
+                model3DGroup.Children.Add(geometry);
+            }
+        }
+
+        /// <summary>
+        /// 重置全景资源
+        /// </summary>
+        /// <param name="panorama"></param>
+        private void ResetPanoramaResource(Panorama panorama)
+        {
+            panorama._resourceConfig = null;
+            panorama._layerCount = 0;
+            panorama._angleRangePerLayer = 0;
+            panorama.CurrentLayerLevel = 0;
+            if (panorama._content != null)
+            {
+                panorama._content.Content = null;
+            }
         }
 
         #endregion
@@ -324,7 +507,8 @@ namespace ZMap.Core
             base.OnApplyTemplate();
 
             _root = GetTemplateChild("PART_Root") as Grid;
-            _camera = GetTemplateChild("PART_Camera") as PerspectiveCamera;
+            Viewport3D = GetTemplateChild("PART_Viewport3D") as Viewport3D;
+            Camera = GetTemplateChild("PART_Camera") as PerspectiveCamera;
             _content = GetTemplateChild("PART_Content") as ModelVisual3D;
 
             MouseWheel += Sphere_MouseWheel;
@@ -333,7 +517,9 @@ namespace ZMap.Core
             MouseMove += Sphere_MouseMove;
             MouseLeftButtonUp += Sphere_MouseLeftButtonUp;
 
-            InitMapTiles();
+            //初始化全景图层
+            int layerLevel = GetLayerLevelByFieldOfView();
+            UpdateLayer(layerLevel);
         }
 
         #endregion

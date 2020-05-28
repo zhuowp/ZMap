@@ -8,6 +8,9 @@
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800">
     <Grid>
-        <core:Panorama/>
+        <Canvas x:Name="canvasTag" Panel.ZIndex="10">
+            <Ellipse x:Name="tag" Width="20" Height="20" Fill="Blue"/>
+        </Canvas>
+        <core:Panorama x:Name="panorama" Resource="C:\Users\dell\Desktop\MapResource"/>
     </Grid>
 </Window>
