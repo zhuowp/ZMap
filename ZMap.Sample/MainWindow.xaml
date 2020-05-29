@@ -9,8 +9,11 @@
         Title="MainWindow" Height="450" Width="800">
     <Grid>
         <Canvas x:Name="canvasTag" Panel.ZIndex="10">
-            <Ellipse x:Name="tag" Width="20" Height="20" Fill="Blue"/>
+            <Ellipse x:Name="tag" Width="10" Height="10" Fill="Blue"/>
         </Canvas>
-        <core:Panorama x:Name="panorama" Resource="C:\Users\dell\Desktop\MapResource"/>
+        <core:Panorama x:Name="panorama" MaxFieldOfView="150" MinFieldOfView="10"
+                       Resource="C:\Users\dell\Desktop\MapResource"
+                       CameraStatusChanged="Panorama_CameraStatusChanged"
+                       CameraStatusChanging="Panorama_CameraStatusChanging"/>
     </Grid>
 </Window>

@@ -53,6 +53,7 @@ namespace ZMap.Core
     {
         #region Fields
 
+        private bool _hasInitializedComponet = false;
         private Grid _root = null;
         private ModelVisual3D _content = null;
 
@@ -62,6 +63,7 @@ namespace ZMap.Core
 
         private Point _mousePosition;
         private bool _isMouseLeftButtonDown = false;
+        private bool _isCameraRotated = false;
 
         #endregion
 
@@ -76,19 +78,19 @@ namespace ZMap.Core
         #region Dependency Properties
 
         public static readonly DependencyProperty MaxFieldOfViewProperty =
-            DependencyProperty.Register("MaxFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(150.0, OnMaxFieldOfViewChanged));
+            DependencyProperty.Register("MaxFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(120.0, OnRangeOfFieldOfViewChanged));
 
         public static readonly DependencyProperty MinFieldOfViewProperty =
-            DependencyProperty.Register("MinFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(5.0, OnMinFieldOfViewChanged));
+            DependencyProperty.Register("MinFieldOfView", typeof(double), typeof(Panorama), new PropertyMetadata(5.0, OnRangeOfFieldOfViewChanged));
 
         public static readonly DependencyProperty RadiusProperty =
             DependencyProperty.Register("Radius", typeof(double), typeof(Panorama), new PropertyMetadata(1.0, OnRadiusChanged));
 
         public static readonly DependencyProperty StackCountProperty =
-            DependencyProperty.Register("StackCount", typeof(int), typeof(Panorama), new PropertyMetadata(64, OnStackCountChanged));
+            DependencyProperty.Register("StackCount", typeof(int), typeof(Panorama), new PropertyMetadata(64, OnSpereModelTriangulationChanged));
 
         public static readonly DependencyProperty SliceCountProperty =
-            DependencyProperty.Register("SliceCount", typeof(int), typeof(Panorama), new PropertyMetadata(64, OnSliceCountChanged));
+            DependencyProperty.Register("SliceCount", typeof(int), typeof(Panorama), new PropertyMetadata(64, OnSpereModelTriangulationChanged));
 
         public static readonly DependencyProperty ResourceProperty =
             DependencyProperty.Register("Resource", typeof(string), typeof(Panorama), new PropertyMetadata(string.Empty, OnResourceChanged));
@@ -153,6 +155,32 @@ namespace ZMap.Core
 
         #endregion
 
+        #region Routed Events
+
+        public static readonly RoutedEvent CameraStatusChangedEvent =
+            EventManager.RegisterRoutedEvent("CameraStatusChanged", RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(Panorama));
+
+        public static readonly RoutedEvent CameraStatusChangingEvent =
+            EventManager.RegisterRoutedEvent("CameraStatusChanging", RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(Panorama));
+
+        #endregion
+
+        #region Routed Event Wrappers
+
+        public event RoutedEventHandler CameraStatusChanged
+        {
+            add { AddHandler(CameraStatusChangedEvent, value); }
+            remove { RemoveHandler(CameraStatusChangedEvent, value); }
+        }
+
+        public event RoutedEventHandler CameraStatusChanging
+        {
+            add { AddHandler(CameraStatusChangingEvent, value); }
+            remove { RemoveHandler(CameraStatusChangingEvent, value); }
+        }
+
+        #endregion
+
         #region Constructors
 
         static Panorama()
@@ -166,7 +194,7 @@ namespace ZMap.Core
 
         #region Dependency Property Changed Callbacks
 
-        private static void OnMaxFieldOfViewChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        private static void OnRangeOfFieldOfViewChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             Panorama panorama = d as Panorama;
 
@@ -177,55 +205,25 @@ namespace ZMap.Core
             {
                 panorama.UpdateAngleRangePerLayer();
 
-                int layerLevel = panorama.GetLayerLevelByFieldOfView();
-                if (panorama.CanChangeLayer(layerLevel))
+                if (panorama._hasInitializedComponet)
                 {
-                    panorama.UpdateLayer(layerLevel);
+                    int layerLevel = panorama.GetLayerLevelByFieldOfView();
+                    if (panorama.CanChangeLayer(layerLevel))
+                    {
+                        panorama.UpdateLayer(layerLevel);
+                    }
                 }
             }
         }
 
-        private static void OnMinFieldOfViewChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            Panorama panorama = d as Panorama;
-
-            double oldValue = (double)e.OldValue;
-            double newValue = (double)e.NewValue;
-
-            if (oldValue != newValue)
-            {
-                panorama.UpdateAngleRangePerLayer();
-
-                int layerLevel = panorama.GetLayerLevelByFieldOfView();
-                if (panorama.CanChangeLayer(layerLevel))
-                {
-                    panorama.UpdateLayer(layerLevel);
-                }
-            }
-        }
-
-        private static void OnStackCountChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        private static void OnSpereModelTriangulationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             Panorama panorama = d as Panorama;
 
             int oldValue = (int)e.OldValue;
             int newValue = (int)e.NewValue;
 
-            if (oldValue != newValue)
-            {
-                int layerLevel = panorama.GetLayerLevelByFieldOfView();
-                panorama.UpdateLayer(layerLevel);
-            }
-        }
-
-        private static void OnSliceCountChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            Panorama panorama = d as Panorama;
-
-            int oldValue = (int)e.OldValue;
-            int newValue = (int)e.NewValue;
-
-            if (oldValue != newValue)
+            if (oldValue != newValue && panorama._hasInitializedComponet)
             {
                 int layerLevel = panorama.GetLayerLevelByFieldOfView();
                 panorama.UpdateLayer(layerLevel);
@@ -239,7 +237,7 @@ namespace ZMap.Core
             int oldValue = (int)e.OldValue;
             int newValue = (int)e.NewValue;
 
-            if (oldValue != newValue)
+            if (oldValue != newValue && panorama._hasInitializedComponet)
             {
                 int layerLevel = panorama.GetLayerLevelByFieldOfView();
                 panorama.UpdateLayer(layerLevel);
@@ -272,6 +270,79 @@ namespace ZMap.Core
             panorama._resourceConfig = resourceConfig;
             panorama._layerCount = panorama._resourceConfig.Layers.Count;
             panorama.UpdateAngleRangePerLayer();
+        }
+
+        #endregion
+
+        #region Mouse Event Handlers
+
+        private void Sphere_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            _mousePosition = e.GetPosition(null);
+            _isMouseLeftButtonDown = true;
+
+            if (_root != null)
+            {
+                Mouse.Capture(_root);
+            }
+        }
+
+        private void Sphere_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isMouseLeftButtonDown)
+            {
+                Visual3DHitTestHelper visual3DHitTestHelper = new Visual3DHitTestHelper();
+                visual3DHitTestHelper.HitTest(Viewport3D, _mousePosition, out Visual3D hitVisual3D, out Point3D HitPoint3D);
+
+                Point mousePotion = e.GetPosition(null);
+                visual3DHitTestHelper.HitTest(Viewport3D, mousePotion, out Visual3D hitVisual3D1, out Point3D HitPoint3D1);
+
+                Vector3D vector1 = new Vector3D(HitPoint3D.X, HitPoint3D.Y, HitPoint3D.Z);
+                Vector3D vector2 = new Vector3D(HitPoint3D1.X, HitPoint3D1.Y, HitPoint3D1.Z);
+
+                Vector3D rotateAxis = Vector3D.CrossProduct(vector1, vector2);
+                double horizontalRotateAngle = -Vector3D.AngleBetween(vector1, vector2);
+
+                Camera?.RotateAroundAxis(rotateAxis, horizontalRotateAngle);
+                _mousePosition = e.GetPosition(null);
+
+                _isCameraRotated = true;
+
+                RoutedEventArgs args = new RoutedEventArgs(CameraStatusChangingEvent, this);
+                RaiseEvent(args);
+            }
+        }
+
+        private void Sphere_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            _isMouseLeftButtonDown = false;
+            if (_root != null)
+            {
+                _root.ReleaseMouseCapture();
+            }
+
+            if (_isCameraRotated)
+            {
+                RoutedEventArgs args = new RoutedEventArgs(CameraStatusChangedEvent, this);
+                RaiseEvent(args);
+
+                _isCameraRotated = false;
+            }
+        }
+
+        private void Sphere_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            double zoomFactor = e.Delta > 0 ? 1 : -1;
+            Camera?.ZoomIn(-zoomFactor, MinFieldOfView, MaxFieldOfView);
+
+            int layerLevel = GetLayerLevelByFieldOfView();
+            if (CanChangeLayer(layerLevel))
+            {
+                UpdateLayer(layerLevel);
+            }
+
+            RoutedEventArgs args = new RoutedEventArgs(CameraStatusChangingEvent, this);
+            RaiseEvent(args);
         }
 
         #endregion
@@ -358,61 +429,6 @@ namespace ZMap.Core
             }
             mesh.Freeze();
             return geometryModel3D;
-        }
-
-        private void Sphere_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            _mousePosition = e.GetPosition(null);
-            _isMouseLeftButtonDown = true;
-
-            if (_root != null)
-            {
-                Mouse.Capture(_root);
-            }
-        }
-
-        private void Sphere_MouseMove(object sender, MouseEventArgs e)
-        {
-            if (_isMouseLeftButtonDown)
-            {
-                Point mousePotion = e.GetPosition(null);
-
-                double verticalMouseMove = mousePotion.Y - _mousePosition.Y;
-                double horizontalMouseMove = mousePotion.X - _mousePosition.X;
-                if (Math.Abs(verticalMouseMove) > Math.Abs(horizontalMouseMove))
-                {
-                    Camera?.VerticalRotateInSitu(verticalMouseMove);
-                }
-                else
-                {
-                    Camera?.HorizontalRotateInSitu(horizontalMouseMove);
-                }
-
-                //Pan = Vector3D.AngleBetween(new Vector3D(_camera.LookDirection.X, 0, _camera.LookDirection.Z), new Vector3D(1, 0, 0)) * (_camera.LookDirection.Z >= 0 ? 1 : -1);
-                //Tilt = 90 - Vector3D.AngleBetween(_camera.LookDirection, new Vector3D(0, 1, 0));
-                _mousePosition = e.GetPosition(null);
-            }
-        }
-
-        private void Sphere_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-        {
-            _isMouseLeftButtonDown = false;
-            if (_root != null)
-            {
-                _root.ReleaseMouseCapture();
-            }
-        }
-
-        private void Sphere_MouseWheel(object sender, MouseWheelEventArgs e)
-        {
-            double zoomFactor = e.Delta > 0 ? 1 : -1;
-            Camera?.ZoomIn(-zoomFactor, MinFieldOfView, MaxFieldOfView);
-
-            int layerLevel = GetLayerLevelByFieldOfView();
-            if (CanChangeLayer(layerLevel))
-            {
-                UpdateLayer(layerLevel);
-            }
         }
 
         /// <summary>
@@ -511,8 +527,9 @@ namespace ZMap.Core
             Camera = GetTemplateChild("PART_Camera") as PerspectiveCamera;
             _content = GetTemplateChild("PART_Content") as ModelVisual3D;
 
-            MouseWheel += Sphere_MouseWheel;
+            _hasInitializedComponet = true;
 
+            MouseWheel += Sphere_MouseWheel;
             MouseLeftButtonDown += Sphere_MouseLeftButtonDown;
             MouseMove += Sphere_MouseMove;
             MouseLeftButtonUp += Sphere_MouseLeftButtonUp;
