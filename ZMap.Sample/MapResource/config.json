@@ -1,0 +1,35 @@
+{
+    "Name": "\u6D4B\u8BD5\u5168\u666F\u5730\u56FE",
+    "Layers": [
+      {
+        "Level": 1,
+        "RowCount": 1,
+        "ColumnCount": 1,
+        "ImageResourcePath": "1x1"
+      },
+      {
+        "Level": 2,
+        "RowCount": 2,
+        "ColumnCount": 2,
+        "ImageResourcePath": "2x2"
+      },
+      {
+        "Level": 3,
+        "RowCount": 4,
+        "ColumnCount": 4,
+        "ImageResourcePath": "4x4"
+      },
+      {
+        "Level": 4,
+        "RowCount": 8,
+        "ColumnCount": 8,
+        "ImageResourcePath": "8x8"
+      },
+      {
+        "Level": 5,
+        "RowCount": 16,
+        "ColumnCount": 16,
+        "ImageResourcePath": "16x16"
+      }
+    ]
+  }

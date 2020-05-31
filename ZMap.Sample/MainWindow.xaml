@@ -12,7 +12,7 @@
             <Ellipse x:Name="tag" Width="10" Height="10" Fill="Blue"/>
         </Canvas>
         <core:Panorama x:Name="panorama" MaxFieldOfView="150" MinFieldOfView="10"
-                       Resource="C:\Users\dell\Desktop\MapResource"
+                       Resource="MapResource"
                        CameraStatusChanged="Panorama_CameraStatusChanged"
                        CameraStatusChanging="Panorama_CameraStatusChanging"/>
     </Grid>

@@ -58,6 +58,7 @@ namespace ZMap.Core
         private ModelVisual3D _content = null;
 
         private PanoramaResourceConfig _resourceConfig = null;
+        private string _fullResourceDirectoryPath = string.Empty;
         private int _layerCount = 0;
         private double _angleRangePerLayer = 0;
 
@@ -250,11 +251,13 @@ namespace ZMap.Core
             string newResourcePath = e.NewValue.ToString();
             if (string.IsNullOrEmpty(newResourcePath))
             {
-                panorama.ResetPanoramaResource(panorama);
+                panorama.ResetPanoramaResource();
                 return;
             }
 
-            string configPath = string.Format(@"{0}\{1}", newResourcePath, "config.json");
+            panorama._fullResourceDirectoryPath = panorama.GetRelativeOrAbsoluteFullPathOfDirectory(newResourcePath);
+
+            string configPath = string.Format(@"{0}\{1}", panorama._fullResourceDirectoryPath, "config.json");
             if (!File.Exists(configPath))
             {
                 throw new Exception("Panorama configuration file does not exist.");
@@ -472,7 +475,7 @@ namespace ZMap.Core
         /// <param name="layerLevel"></param>
         private void UpdateLayer(int layerLevel)
         {
-            if (_content == null)
+            if (_content == null || string.IsNullOrEmpty(_fullResourceDirectoryPath))
             {
                 return;
             }
@@ -486,7 +489,7 @@ namespace ZMap.Core
 
             List<GeometryModel3D> geometries = CreateAllMapTileGeometryModel3Ds(layer.RowCount, layer.ColumnCount);
 
-            string imageResourcePath = string.Format(@"{0}\{1}", Resource, layer.ImageResourcePath);
+            string imageResourcePath = string.Format(@"{0}\{1}", _fullResourceDirectoryPath, layer.ImageResourcePath);
             for (int i = 0; i < geometries.Count; i++)
             {
                 GeometryModel3D geometry = geometries[i];
@@ -498,19 +501,38 @@ namespace ZMap.Core
             }
         }
 
+        private string GetRelativeOrAbsoluteFullPathOfDirectory(string path)
+        {
+            string relativeFullPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+            if (Directory.Exists(relativeFullPath))
+            {
+                return relativeFullPath;
+            }
+
+            if (Directory.Exists(path))
+            {
+                return path;
+            }
+            else
+            {
+                throw new Exception("The directory of resource does not exist.");
+            }
+        }
+
         /// <summary>
         /// 重置全景资源
         /// </summary>
         /// <param name="panorama"></param>
-        private void ResetPanoramaResource(Panorama panorama)
+        private void ResetPanoramaResource()
         {
-            panorama._resourceConfig = null;
-            panorama._layerCount = 0;
-            panorama._angleRangePerLayer = 0;
-            panorama.CurrentLayerLevel = 0;
-            if (panorama._content != null)
+            _fullResourceDirectoryPath = string.Empty;
+            _resourceConfig = null;
+            _layerCount = 0;
+            _angleRangePerLayer = 0;
+            CurrentLayerLevel = 0;
+            if (_content != null)
             {
-                panorama._content.Content = null;
+                _content.Content = null;
             }
         }
 
