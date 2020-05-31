@@ -10,6 +10,7 @@ using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 using System.Windows.Navigation;
@@ -39,6 +40,13 @@ namespace ZMap.Sample
             _thread = new Thread(ContinuouslyUpdateTagLocation);
             _thread.IsBackground = true;
             _thread.Start();
+
+            CameraRotateAnimation rotateAnimation = new CameraRotateAnimation(
+                new CameraLookDirection(new Vector3D(1, 0, 0), new Vector3D()),
+                new CameraLookDirection(new Vector3D(1, -1, 1), new Vector3D()),
+                new Duration(TimeSpan.FromSeconds(20)), FillBehavior.Stop);
+            //rotateAnimation.EasingFunction = new CircleEase() { EasingMode = EasingMode.EaseInOut };
+            panorama.BeginAnimation(Panorama.LookDirectionProperty, rotateAnimation);
         }
 
         #endregion

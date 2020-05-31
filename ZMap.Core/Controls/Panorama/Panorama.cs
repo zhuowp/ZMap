@@ -96,6 +96,9 @@ namespace ZMap.Core
         public static readonly DependencyProperty ResourceProperty =
             DependencyProperty.Register("Resource", typeof(string), typeof(Panorama), new PropertyMetadata(string.Empty, OnResourceChanged));
 
+        public static readonly DependencyProperty LookDirectionProperty =
+            DependencyProperty.Register("LookDirection", typeof(CameraLookDirection), typeof(Panorama), new PropertyMetadata(new CameraLookDirection(), OnLookDirectionChanged));
+
         #endregion
 
         #region Dependency Property Wrappers
@@ -152,6 +155,15 @@ namespace ZMap.Core
         {
             get { return (string)GetValue(ResourceProperty); }
             set { SetValue(ResourceProperty, value); }
+        }
+
+        /// <summary>
+        /// 全景摄像机照射方向
+        /// </summary>
+        public CameraLookDirection LookDirection
+        {
+            get { return (CameraLookDirection)GetValue(LookDirectionProperty); }
+            set { SetValue(LookDirectionProperty, value); }
         }
 
         #endregion
@@ -273,6 +285,22 @@ namespace ZMap.Core
             panorama._resourceConfig = resourceConfig;
             panorama._layerCount = panorama._resourceConfig.Layers.Count;
             panorama.UpdateAngleRangePerLayer();
+        }
+
+        private static void OnLookDirectionChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            Panorama panorama = d as Panorama;
+            CameraLookDirection lookDirection = (CameraLookDirection)e.NewValue;
+            if (lookDirection == new CameraLookDirection())
+            {
+                return;
+            }
+
+            if (panorama.Camera != null)
+            {
+                panorama.Camera.LookDirection = lookDirection.LookDirection;
+                panorama.Camera.UpDirection = lookDirection.UpDirection;
+            }
         }
 
         #endregion
