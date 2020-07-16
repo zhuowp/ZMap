@@ -51,7 +51,7 @@ namespace ZMap.Core
 
         public override int GetHashCode()
         {
-            return base.GetHashCode();
+            return ToString().GetHashCode();
         }
 
         public override string ToString()

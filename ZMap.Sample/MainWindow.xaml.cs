@@ -41,9 +41,19 @@ namespace ZMap.Sample
             _thread.IsBackground = true;
             _thread.Start();
 
+            Loaded += MainWindow_Loaded;
+        }
+
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
             CameraRotateAnimation rotateAnimation = new CameraRotateAnimation(
                 new CameraLookDirection(new Vector3D(1, 0, 0), new Vector3D()),
-                new CameraLookDirection(new Vector3D(1, -1, 1), new Vector3D()),
+                new List<CameraLookDirection>
+                {
+                    new CameraLookDirection(new Vector3D(1, -1, 1), new Vector3D()),
+                    new CameraLookDirection(new Vector3D(1, -1, 3), new Vector3D()),
+                    new CameraLookDirection(new Vector3D(1, 0, 0), new Vector3D())
+                },
                 new Duration(TimeSpan.FromSeconds(20)), FillBehavior.Stop);
             //rotateAnimation.EasingFunction = new CircleEase() { EasingMode = EasingMode.EaseInOut };
             panorama.BeginAnimation(Panorama.LookDirectionProperty, rotateAnimation);

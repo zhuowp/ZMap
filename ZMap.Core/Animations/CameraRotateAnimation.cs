@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Media.Animation;
@@ -13,6 +14,8 @@ namespace ZMap.Core
         #region Fields
 
         private CameraLookDirection[] _keyValues;
+        private double[] _progressBegins;
+
         private AnimationType _animationType;
         private bool _isAnimationFunctionValid;
 
@@ -22,7 +25,7 @@ namespace ZMap.Core
 
         public static readonly DependencyProperty FromProperty;
         public static readonly DependencyProperty ToProperty;
-        public static readonly DependencyProperty ByProperty;
+        public static readonly DependencyProperty TosProperty;
         public static readonly DependencyProperty EasingFunctionProperty;
 
         #endregion
@@ -53,15 +56,15 @@ namespace ZMap.Core
             }
         }
 
-        public CameraLookDirection? By
+        public IEnumerable<CameraLookDirection> Tos
         {
             get
             {
-                return (CameraLookDirection?)GetValue(ByProperty);
+                return (IEnumerable<CameraLookDirection>)GetValue(TosProperty);
             }
             set
             {
-                SetValue(ByProperty, value);
+                SetValue(TosProperty, value);
             }
         }
 
@@ -105,27 +108,30 @@ namespace ZMap.Core
 
         #region Constructors
 
+        /// <summary>
+        /// 静态构造方法
+        /// </summary>
         static CameraRotateAnimation()
         {
-            Type typeofProp = typeof(CameraLookDirection?);
-            Type typeofThis = typeof(CameraRotateAnimation);
+            Type typeofLookDirection = typeof(CameraLookDirection?);
+            Type typeOfAnimation = typeof(CameraRotateAnimation);
 
-            PropertyChangedCallback propCallback = new PropertyChangedCallback(AnimationFunction_Changed);
-            ValidateValueCallback validateCallback = new ValidateValueCallback(ValidateFromToOrByValue);
+            PropertyChangedCallback propCallback = new PropertyChangedCallback(LookDirectionPropertiesChanged);
+            ValidateValueCallback validateCallback = new ValidateValueCallback(ValidateFromToValue);
 
             FromProperty =
-                DependencyProperty.Register("From", typeofProp, typeofThis, new PropertyMetadata(null, propCallback), validateCallback);
+                DependencyProperty.Register("From", typeofLookDirection, typeOfAnimation, new PropertyMetadata(null, propCallback), validateCallback);
             ToProperty =
-                DependencyProperty.Register("To", typeofProp, typeofThis, new PropertyMetadata(null, propCallback), validateCallback);
-            ByProperty =
-                DependencyProperty.Register("By", typeofProp, typeofThis, new PropertyMetadata(null, propCallback), validateCallback);
+                DependencyProperty.Register("To", typeofLookDirection, typeOfAnimation, new PropertyMetadata(null, propCallback), validateCallback);
+            TosProperty =
+                DependencyProperty.Register("Tos", typeof(IEnumerable<CameraLookDirection>), typeOfAnimation,
+                new PropertyMetadata(null, propCallback), TosValidateCallback);
             EasingFunctionProperty =
-                DependencyProperty.Register("EasingFunction", typeof(IEasingFunction), typeofThis);
+                DependencyProperty.Register("EasingFunction", typeof(IEasingFunction), typeOfAnimation);
         }
 
         /// <summary>
-        /// Creates a new DoubleAnimation with all properties set to
-        /// their default values.
+        /// 无参构造方法
         /// </summary>
         public CameraRotateAnimation()
             : base()
@@ -133,10 +139,10 @@ namespace ZMap.Core
         }
 
         /// <summary>
-        /// Creates a new DoubleAnimation that will animate a
-        /// Double property from its base value to the value specified
-        /// by the "toValue" parameter of this constructor.
+        /// 
         /// </summary>
+        /// <param name="toValue"></param>
+        /// <param name="duration"></param>
         public CameraRotateAnimation(CameraLookDirection toValue, Duration duration)
             : this()
         {
@@ -184,17 +190,58 @@ namespace ZMap.Core
             FillBehavior = fillBehavior;
         }
 
+        public CameraRotateAnimation(IEnumerable<CameraLookDirection> tosValue, Duration duration)
+        {
+            Tos = tosValue;
+            Duration = duration;
+        }
+
+        public CameraRotateAnimation(IEnumerable<CameraLookDirection> tosValue, Duration duration, FillBehavior fillBehavior)
+        {
+            Tos = tosValue;
+            Duration = duration;
+            FillBehavior = fillBehavior;
+        }
+
+        public CameraRotateAnimation(CameraLookDirection fromValue, IEnumerable<CameraLookDirection> tosValue, Duration duration)
+        {
+            From = fromValue;
+            Tos = tosValue;
+            Duration = duration;
+        }
+
+        public CameraRotateAnimation(CameraLookDirection fromValue, IEnumerable<CameraLookDirection> tosValue, Duration duration, FillBehavior fillBehavior)
+        {
+            From = fromValue;
+            Tos = tosValue;
+            Duration = duration;
+            FillBehavior = FillBehavior;
+        }
+
         #endregion
 
         #region Private Methods
 
-        private static void AnimationFunction_Changed(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        private static void LookDirectionPropertiesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             CameraRotateAnimation a = (CameraRotateAnimation)d;
             a._isAnimationFunctionValid = false;
         }
 
-        private static bool ValidateFromToOrByValue(object value)
+        private static bool TosValidateCallback(object value)
+        {
+            IEnumerable<CameraLookDirection> toDirections = value as IEnumerable<CameraLookDirection>;
+            if (toDirections != null)
+            {
+                return true;
+            }
+            else
+            {
+                return true;
+            }
+        }
+
+        private static bool ValidateFromToValue(object value)
         {
             CameraLookDirection? typedValue = (CameraLookDirection?)value;
 
@@ -208,81 +255,11 @@ namespace ZMap.Core
             }
         }
 
-        #endregion
-
-        #region Freezable
-
-        public new CameraRotateAnimation Clone()
-        {
-            return (CameraRotateAnimation)base.Clone();
-        }
-
-        protected override Freezable CreateInstanceCore()
-        {
-            return new CameraRotateAnimation();
-        }
-
-        #endregion
-
-        #region Methods
-
-        protected override CameraLookDirection GetCurrentValueCore(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue, AnimationClock animationClock)
-        {
-            Debug.Assert(animationClock.CurrentState != ClockState.Stopped);
-
-            if (!_isAnimationFunctionValid)
-            {
-                ValidateAnimationFunction();
-            }
-
-            double progress = animationClock.CurrentProgress.Value;
-
-            IEasingFunction easingFunction = EasingFunction;
-            if (easingFunction != null)
-            {
-                progress = easingFunction.Ease(progress);
-            }
-
-            CameraLookDirection from = new CameraLookDirection();
-            CameraLookDirection to = new CameraLookDirection();
-
-            switch (_animationType)
-            {
-                case AnimationType.Automatic:
-                    from = defaultOriginValue;
-                    to = defaultDestinationValue;
-                    break;
-                case AnimationType.From:
-                    from = _keyValues[0];
-                    to = defaultDestinationValue;
-                    break;
-                case AnimationType.To:
-                    from = defaultOriginValue;
-                    to = _keyValues[0];
-                    break;
-                case AnimationType.By:
-                    to = _keyValues[0];
-                    break;
-                case AnimationType.FromTo:
-                    from = _keyValues[0];
-                    to = _keyValues[1];
-                    break;
-                default:
-                    throw new Exception("Unknown animation type.");
-            }
-
-            Vector3D lookDirection = from.LookDirection + (to.LookDirection - from.LookDirection) * progress;
-            Vector3D horizontalVector3D = Vector3D.CrossProduct(new Vector3D(0, -1, 0), lookDirection);
-            Vector3D upDirection = Vector3D.CrossProduct(horizontalVector3D, lookDirection);
-
-            CameraLookDirection cameraLookDirection = new CameraLookDirection(lookDirection, upDirection);
-            return cameraLookDirection;
-        }
-
-        private void ValidateAnimationFunction()
+        private void ValidateAnimationFunction(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue)
         {
             _animationType = AnimationType.Automatic;
             _keyValues = null;
+            _progressBegins = null;
 
             if (From.HasValue)
             {
@@ -293,39 +270,153 @@ namespace ZMap.Core
                     _keyValues[0] = From.Value;
                     _keyValues[1] = To.Value;
                 }
-                else if (By.HasValue)
+                else if (Tos != null && Tos.Count() != 0)
                 {
-                    _animationType = AnimationType.FromBy;
-                    _keyValues = new CameraLookDirection[2];
+                    _animationType = AnimationType.FromTo;
+                    _keyValues = new CameraLookDirection[Tos.Count() + 1];
                     _keyValues[0] = From.Value;
-                    _keyValues[1] = By.Value;
+
+                    int index = 1;
+                    foreach (CameraLookDirection lookDirection in Tos)
+                    {
+                        _keyValues[index] = lookDirection;
+                        index++;
+                    }
                 }
                 else
                 {
-                    _animationType = AnimationType.From;
-                    _keyValues = new CameraLookDirection[1];
+                    _animationType = AnimationType.FromTo;
+                    _keyValues = new CameraLookDirection[2];
                     _keyValues[0] = From.Value;
+                    _keyValues[1] = defaultDestinationValue;
                 }
             }
             else if (To.HasValue)
             {
-                _animationType = AnimationType.To;
-                _keyValues = new CameraLookDirection[1];
-                _keyValues[0] = To.Value;
+                _animationType = AnimationType.FromTo;
+                _keyValues = new CameraLookDirection[2];
+                _keyValues[0] = defaultOriginValue;
+                _keyValues[1] = To.Value;
             }
-            else if (By.HasValue)
+            else if (Tos != null && Tos.Count() != 0)
             {
-                _animationType = AnimationType.By;
-                _keyValues = new CameraLookDirection[1];
-                _keyValues[0] = By.Value;
+                _animationType = AnimationType.FromTo;
+                _keyValues = new CameraLookDirection[Tos.Count() + 1];
+                _keyValues[0] = defaultOriginValue;
+
+                int index = 1;
+                foreach (CameraLookDirection lookDirection in Tos)
+                {
+                    _keyValues[index] = lookDirection;
+                    index++;
+                }
+            }
+            else
+            {
+                _animationType = AnimationType.FromTo;
+                _keyValues = new CameraLookDirection[2];
+                _keyValues[0] = defaultOriginValue;
+                _keyValues[1] = defaultDestinationValue;
             }
 
+            if (_keyValues != null && _keyValues.Length > 0)
+            {
+                int valueCount = _keyValues.Length;
+
+                //计算总的旋转角度
+                double totalAngle = 0;
+                double[] anglesToOriginDirection = new double[valueCount];
+                for (int i = 1; i < valueCount; i++)
+                {
+                    double angleToPreviousDirection = Vector3D.AngleBetween(_keyValues[i - 1].LookDirection, _keyValues[i].LookDirection);
+                    anglesToOriginDirection[i] = anglesToOriginDirection[i - 1] + angleToPreviousDirection;
+
+                    totalAngle += angleToPreviousDirection;
+                }
+
+                _progressBegins = new double[valueCount];
+                for (int i = 1; i < valueCount; i++)
+                {
+                    _progressBegins[i] = anglesToOriginDirection[i] / totalAngle;
+                }
+            }
             _isAnimationFunctionValid = true;
         }
 
         #endregion
 
-        #region Properties
+        #region Protected Methods
+
+        protected override Freezable CreateInstanceCore()
+        {
+            return new CameraRotateAnimation();
+        }
+
+        protected override CameraLookDirection GetCurrentValueCore(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue, AnimationClock animationClock)
+        {
+            if (!_isAnimationFunctionValid)
+            {
+                ValidateAnimationFunction(defaultOriginValue, defaultDestinationValue);
+            }
+
+            double progress = animationClock.CurrentProgress.Value;
+
+            IEasingFunction easingFunction = EasingFunction;
+            if (easingFunction != null)
+            {
+                progress = easingFunction.Ease(progress);
+            }
+
+            int sectionIndex = 0;
+            if (progress >= 1)
+            {
+                progress = 1;
+                sectionIndex = _progressBegins.Length - 2;
+            }
+            else
+            {
+                for (int i = 0; i < _progressBegins.Length - 1; i++)
+                {
+                    if (_progressBegins[i] <= progress && _progressBegins[i + 1] > progress)
+                    {
+                        sectionIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            CameraLookDirection from = _keyValues[sectionIndex];
+            CameraLookDirection to = _keyValues[sectionIndex + 1];
+            double progressBetweenCurrentDirections = (progress - _progressBegins[sectionIndex]) / (_progressBegins[sectionIndex + 1] - _progressBegins[sectionIndex]);
+
+            Vector3D rotateAxis = Vector3D.CrossProduct(from.LookDirection, to.LookDirection);
+            double fullRotateAngle = Vector3D.AngleBetween(from.LookDirection, to.LookDirection);
+            double rotateAngle = fullRotateAngle * progressBetweenCurrentDirections;
+
+            RotateTransform3D rotateTransform3D = new RotateTransform3D();
+            rotateTransform3D.Rotation = new AxisAngleRotation3D(rotateAxis, rotateAngle);
+            Matrix3D matrix = rotateTransform3D.Value;
+
+            Point3D newCameraLookPoint = matrix.Transform(new Point3D(from.LookDirection.X, from.LookDirection.Y, from.LookDirection.Z));
+            Vector3D newCameraLookDirection = new Vector3D(newCameraLookPoint.X, newCameraLookPoint.Y, newCameraLookPoint.Z);
+
+            Vector3D horizontalVector3D = Vector3D.CrossProduct(new Vector3D(0, -1, 0), newCameraLookDirection);
+            Vector3D upDirection = Vector3D.CrossProduct(horizontalVector3D, newCameraLookDirection);
+
+            CameraLookDirection cameraLookDirection = new CameraLookDirection(newCameraLookDirection, upDirection);
+            return cameraLookDirection;
+        }
+
+        private Vector3D _oldLookDirection;
+
+        #endregion
+
+        #region Public Methods
+
+        public new CameraRotateAnimation Clone()
+        {
+            return (CameraRotateAnimation)base.Clone();
+        }
 
         #endregion
     }
