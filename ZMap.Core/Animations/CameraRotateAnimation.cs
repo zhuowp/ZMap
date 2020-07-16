@@ -15,8 +15,9 @@ namespace ZMap.Core
 
         private CameraLookDirection[] _keyValues;
         private double[] _progressBegins;
+        private Vector3D[] _rotateAxesOfSection;
+        private double[] _anglesOfSection;
 
-        private AnimationType _animationType;
         private bool _isAnimationFunctionValid;
 
         #endregion
@@ -255,24 +256,70 @@ namespace ZMap.Core
             }
         }
 
-        private void ValidateAnimationFunction(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue)
+        private void TryValidateAnimationFunction(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue)
         {
-            _animationType = AnimationType.Automatic;
-            _keyValues = null;
-            _progressBegins = null;
+            if (_isAnimationFunctionValid)
+            {
+                return;
+            }
 
+            InitAnimationKeyValues(defaultOriginValue, defaultDestinationValue);
+
+            if (_keyValues != null && _keyValues.Length > 0)
+            {
+                int keyValueCount = _keyValues.Length;
+                int sectionCount = keyValueCount - 1;
+                _rotateAxesOfSection = new Vector3D[sectionCount];
+                for (int i = 0; i < sectionCount; i++)
+                {
+                    _rotateAxesOfSection[i] = Vector3D.CrossProduct(_keyValues[i].LookDirection, _keyValues[i + 1].LookDirection);
+                }
+
+                _anglesOfSection = new double[sectionCount];
+
+                //计算每一个旋转片段的旋转角
+                for (int i = 0; i < sectionCount; i++)
+                {
+                    _anglesOfSection[i] = Vector3D.AngleBetween(_keyValues[i].LookDirection, _keyValues[i + 1].LookDirection);
+                }
+
+                //计算总的旋转角度
+                double totalAngle = _anglesOfSection.Sum();
+
+                //计算每一个关键点的指向与初值关键点间的旋转角的总和
+                double[] rotateAnglesToOriginDirection = new double[keyValueCount];
+                for (int i = 0; i < sectionCount; i++)
+                {
+                    rotateAnglesToOriginDirection[i + 1] = rotateAnglesToOriginDirection[i] + _anglesOfSection[i];
+                }
+
+                _progressBegins = new double[keyValueCount];
+                for (int i = 1; i < keyValueCount; i++)
+                {
+                    _progressBegins[i] = rotateAnglesToOriginDirection[i] / totalAngle;
+                }
+            }
+
+            _isAnimationFunctionValid = true;
+        }
+
+        /// <summary>
+        /// 初始化动画关键点值
+        /// </summary>
+        /// <param name="defaultOriginValue"></param>
+        /// <param name="defaultDestinationValue"></param>
+        private void InitAnimationKeyValues(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue)
+        {
             if (From.HasValue)
             {
                 if (To.HasValue)
                 {
-                    _animationType = AnimationType.FromTo;
                     _keyValues = new CameraLookDirection[2];
                     _keyValues[0] = From.Value;
                     _keyValues[1] = To.Value;
                 }
                 else if (Tos != null && Tos.Count() != 0)
                 {
-                    _animationType = AnimationType.FromTo;
                     _keyValues = new CameraLookDirection[Tos.Count() + 1];
                     _keyValues[0] = From.Value;
 
@@ -285,7 +332,6 @@ namespace ZMap.Core
                 }
                 else
                 {
-                    _animationType = AnimationType.FromTo;
                     _keyValues = new CameraLookDirection[2];
                     _keyValues[0] = From.Value;
                     _keyValues[1] = defaultDestinationValue;
@@ -293,14 +339,12 @@ namespace ZMap.Core
             }
             else if (To.HasValue)
             {
-                _animationType = AnimationType.FromTo;
                 _keyValues = new CameraLookDirection[2];
                 _keyValues[0] = defaultOriginValue;
                 _keyValues[1] = To.Value;
             }
             else if (Tos != null && Tos.Count() != 0)
             {
-                _animationType = AnimationType.FromTo;
                 _keyValues = new CameraLookDirection[Tos.Count() + 1];
                 _keyValues[0] = defaultOriginValue;
 
@@ -313,34 +357,89 @@ namespace ZMap.Core
             }
             else
             {
-                _animationType = AnimationType.FromTo;
                 _keyValues = new CameraLookDirection[2];
                 _keyValues[0] = defaultOriginValue;
                 _keyValues[1] = defaultDestinationValue;
             }
+        }
 
-            if (_keyValues != null && _keyValues.Length > 0)
+        private CameraLookDirection GetCameraLookDirectionAfterRotate(CameraLookDirection originalLookDirection, Vector3D rotateAxis, double rotateAngle)
+        {
+            RotateTransform3D rotateTransform3D = new RotateTransform3D();
+            rotateTransform3D.Rotation = new AxisAngleRotation3D(rotateAxis, rotateAngle);
+            Matrix3D matrix = rotateTransform3D.Value;
+
+            Point3D newCameraLookPoint = matrix.Transform(new Point3D(originalLookDirection.LookDirection.X, originalLookDirection.LookDirection.Y, originalLookDirection.LookDirection.Z));
+            Vector3D newCameraLookDirection = new Vector3D(newCameraLookPoint.X, newCameraLookPoint.Y, newCameraLookPoint.Z);
+
+            Vector3D horizontalVector3D = Vector3D.CrossProduct(new Vector3D(0, -1, 0), newCameraLookDirection);
+            Vector3D upDirection = Vector3D.CrossProduct(horizontalVector3D, newCameraLookDirection);
+
+            CameraLookDirection cameraLookDirection = new CameraLookDirection(newCameraLookDirection, upDirection);
+            return cameraLookDirection;
+        }
+
+        /// <summary>
+        /// 根据总的动画进度获取在当前旋转片段内的进度
+        /// </summary>
+        /// <param name="progress"></param>
+        /// <param name="sectionIndex"></param>
+        /// <returns></returns>
+        private double GetProgressInSection(double progress, int sectionIndex)
+        {
+            double totalProgressSpanInSection = _progressBegins[sectionIndex + 1] - _progressBegins[sectionIndex];
+            if (totalProgressSpanInSection == 0)
             {
-                int valueCount = _keyValues.Length;
+                return 0;
+            }
 
-                //计算总的旋转角度
-                double totalAngle = 0;
-                double[] anglesToOriginDirection = new double[valueCount];
-                for (int i = 1; i < valueCount; i++)
+            return (progress - _progressBegins[sectionIndex]) / totalProgressSpanInSection;
+        }
+
+        /// <summary>
+        /// 根据进度获取当前旋转所在片段的索引
+        /// </summary>
+        /// <param name="progress"></param>
+        /// <returns></returns>
+        private int GetRotateSectionIndex(ref double progress)
+        {
+            int sectionIndex = 0;
+
+            for (int i = 0; i < _progressBegins.Length - 1; i++)
+            {
+                if (_progressBegins[i] <= progress && _progressBegins[i + 1] >= progress)
                 {
-                    double angleToPreviousDirection = Vector3D.AngleBetween(_keyValues[i - 1].LookDirection, _keyValues[i].LookDirection);
-                    anglesToOriginDirection[i] = anglesToOriginDirection[i - 1] + angleToPreviousDirection;
-
-                    totalAngle += angleToPreviousDirection;
-                }
-
-                _progressBegins = new double[valueCount];
-                for (int i = 1; i < valueCount; i++)
-                {
-                    _progressBegins[i] = anglesToOriginDirection[i] / totalAngle;
+                    sectionIndex = i;
+                    break;
                 }
             }
-            _isAnimationFunctionValid = true;
+
+            return sectionIndex;
+        }
+
+        /// <summary>
+        /// 获取当前动画进度
+        /// </summary>
+        /// <param name="animationClock"></param>
+        /// <returns></returns>
+        private double GetCurrentProgress(AnimationClock animationClock)
+        {
+            double progress = animationClock.CurrentProgress.Value;
+
+            //获取经缓动函数变换后的进度
+            IEasingFunction easingFunction = EasingFunction;
+            if (easingFunction != null)
+            {
+                progress = easingFunction.Ease(progress);
+            }
+
+            //进度不大于1
+            if (progress > 1)
+            {
+                progress = 1;
+            }
+
+            return progress;
         }
 
         #endregion
@@ -354,60 +453,22 @@ namespace ZMap.Core
 
         protected override CameraLookDirection GetCurrentValueCore(CameraLookDirection defaultOriginValue, CameraLookDirection defaultDestinationValue, AnimationClock animationClock)
         {
-            if (!_isAnimationFunctionValid)
-            {
-                ValidateAnimationFunction(defaultOriginValue, defaultDestinationValue);
-            }
+            TryValidateAnimationFunction(defaultOriginValue, defaultDestinationValue);
 
-            double progress = animationClock.CurrentProgress.Value;
+            double progress = GetCurrentProgress(animationClock);
+            int sectionIndex = GetRotateSectionIndex(ref progress);
 
-            IEasingFunction easingFunction = EasingFunction;
-            if (easingFunction != null)
-            {
-                progress = easingFunction.Ease(progress);
-            }
+            double progressInSection = GetProgressInSection(progress, sectionIndex);
 
-            int sectionIndex = 0;
-            if (progress >= 1)
-            {
-                progress = 1;
-                sectionIndex = _progressBegins.Length - 2;
-            }
-            else
-            {
-                for (int i = 0; i < _progressBegins.Length - 1; i++)
-                {
-                    if (_progressBegins[i] <= progress && _progressBegins[i + 1] > progress)
-                    {
-                        sectionIndex = i;
-                        break;
-                    }
-                }
-            }
+            CameraLookDirection rotateFromDirectionInSection = _keyValues[sectionIndex];
 
-            CameraLookDirection from = _keyValues[sectionIndex];
-            CameraLookDirection to = _keyValues[sectionIndex + 1];
-            double progressBetweenCurrentDirections = (progress - _progressBegins[sectionIndex]) / (_progressBegins[sectionIndex + 1] - _progressBegins[sectionIndex]);
+            Vector3D rotateAxis = _rotateAxesOfSection[sectionIndex];
+            double fullRotateAngle = _anglesOfSection[sectionIndex];
+            double rotateAngle = fullRotateAngle * progressInSection;
 
-            Vector3D rotateAxis = Vector3D.CrossProduct(from.LookDirection, to.LookDirection);
-            double fullRotateAngle = Vector3D.AngleBetween(from.LookDirection, to.LookDirection);
-            double rotateAngle = fullRotateAngle * progressBetweenCurrentDirections;
-
-            RotateTransform3D rotateTransform3D = new RotateTransform3D();
-            rotateTransform3D.Rotation = new AxisAngleRotation3D(rotateAxis, rotateAngle);
-            Matrix3D matrix = rotateTransform3D.Value;
-
-            Point3D newCameraLookPoint = matrix.Transform(new Point3D(from.LookDirection.X, from.LookDirection.Y, from.LookDirection.Z));
-            Vector3D newCameraLookDirection = new Vector3D(newCameraLookPoint.X, newCameraLookPoint.Y, newCameraLookPoint.Z);
-
-            Vector3D horizontalVector3D = Vector3D.CrossProduct(new Vector3D(0, -1, 0), newCameraLookDirection);
-            Vector3D upDirection = Vector3D.CrossProduct(horizontalVector3D, newCameraLookDirection);
-
-            CameraLookDirection cameraLookDirection = new CameraLookDirection(newCameraLookDirection, upDirection);
+            CameraLookDirection cameraLookDirection = GetCameraLookDirectionAfterRotate(rotateFromDirectionInSection, rotateAxis, rotateAngle);
             return cameraLookDirection;
         }
-
-        private Vector3D _oldLookDirection;
 
         #endregion
 
